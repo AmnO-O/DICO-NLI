@@ -219,3 +219,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Experiment outputs and locally downloaded dataset archives
+results/
+final_data/DiCO-NLI/
+final_data/DiCO-NLI.zip
