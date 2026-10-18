@@ -1,9 +1,10 @@
-from typing import Union, Dict, Tuple, Optional, List
+from typing import Union, Dict, Tuple, Optional, List, Any
 from tqdm import tqdm
 import optuna
 import os
 import random
 import csv
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -191,6 +192,8 @@ class Trainer:
 
         print("\nStarting training loop:")
 
+        history: List[Dict[str, Any]] = []
+
         for epoch in range(num_epochs):
             print(f"\n>>> Epoch {epoch + 1}/{num_epochs}")
             self.model.train()
@@ -207,10 +210,19 @@ class Trainer:
                 epoch_loss += loss.item()
 
             avg_loss = epoch_loss / train_data_len
+            record: Dict[str, Any] = {
+                "epoch": epoch + 1,
+                "train_loss": float(avg_loss),
+                "learning_rate": float(scheduler.get_last_lr()[0]),
+            }
             print(f"Epoch {epoch + 1} average loss: {avg_loss:.4f}")
 
             if self.params["do_dev"]:
                 results:Dict[str, Union[float, np.ndarray]] = self.evaluation_loop(partition="dev", print_results=True)
+                if results is not None:
+                    record["dev_f1_weighted"] = float(results["f1_weighted"])
+                    record["dev_f1_macro"] = float(results["f1_macro"])
+                    record["dev_accuracy"] = float(results["accuracy"])
                 if self.params["optuna"] is not None:
                     
                     # Set another metric to report if needed 
@@ -219,6 +231,9 @@ class Trainer:
                     if self.params["optuna"].should_prune():
                         raise optuna.TrialPruned()
             
+            history.append(record)
+            self.write_training_history(history=history)
+
             if self.params["epoch_to_stop"] is not None and (epoch + 1) == int(self.params["epoch_to_stop"]):
                 print(f"Stopping at epoch {epoch + 1} as specified.")
                 break
@@ -226,6 +241,49 @@ class Trainer:
         if self.params["save_path"] is not None:
             print(f"Saving model in path: {self.params['save_path']}")
             self.model.save(path=str(self.params["save_path"]))
+
+    def history_base_dir(self) -> Path:
+        """Directory where the per-epoch training history is written.
+
+        Prefers the parent of ``save_path`` (unique per run), otherwise falls
+        back to ``results_dir``.
+        """
+        save_path = self.params.get("save_path")
+        if save_path:
+            return Path(str(save_path)).parent
+        return Path(str(self.params.get("results_dir", "results")))
+
+    def write_training_history(self, history: List[Dict[str, Any]]) -> None:
+        """Persist the per-epoch training history as JSON and CSV.
+
+        Called after every epoch so the curve survives crashes and Optuna pruning.
+        """
+        if not history:
+            return
+
+        base_dir = self.history_base_dir()
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        suffix = ""
+        if self.params.get("optuna") is not None:
+            suffix = f"_trial{self.params['optuna'].number}"
+
+        json_path = base_dir / f"training_history{suffix}.json"
+        csv_path = base_dir / f"training_history{suffix}.csv"
+
+        with json_path.open("w", encoding="utf-8") as handle:
+            json.dump(history, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+
+        fieldnames: List[str] = list(history[-1].keys())
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for record in history:
+                writer.writerow(record)
+
+        print(f"Training history written to: {json_path}")
+
 
     def evaluation_loop(self, partition: str, print_results: bool) -> Optional[Dict[str, Union[float, np.ndarray]]]:
         self.model.eval()
