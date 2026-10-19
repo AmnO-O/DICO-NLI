@@ -46,6 +46,9 @@ if __name__ == "__main__":
     parser.add_argument("--wd", type=float, help="Weight decay for the optimizer. ([1e-6, 5e-6, 8e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1])")
     parser.add_argument("--num_epochs", type=int, help="Number of training epochs (between 1 and 10).")
 
+    parser.add_argument("--freeze_bottom_layers", type=int, default=None,
+                        help="Freeze the bottom N encoder layers; train only the top (num_layers - N) layers and the classifier head. (ModernBERT/transformers encoder models only)")
+
     parser.add_argument("--is_optuna_trial", action=argparse.BooleanOptionalAction, help="Whether this run is an Optuna hyperparameter optimization trial.", required=True)
     parser.add_argument("--study_name", type=str, help="Optuna study name")
     parser.add_argument("--storage_name", type=str, help="Optuna storage name")
@@ -122,6 +125,7 @@ if __name__ == "__main__":
         "batch_size": args.batch_size,
         "wd": args.wd,
         "num_epochs": args.num_epochs,
+        "freeze_bottom_layers": args.freeze_bottom_layers,
         "save_path": args.save_path,
         "epoch_to_stop": args.epoch_to_stop,
         "results_dir": args.results_dir,

@@ -44,6 +44,65 @@ class Model:
             config=self.config,
         )
 
+        # Optional partial unfreezing: freeze bottom N encoder layers
+        if params.get("freeze_bottom_layers") is not None:
+            try:
+                n_freeze = int(params["freeze_bottom_layers"])
+            except (ValueError, TypeError):
+                n_freeze = None
+            if n_freeze is not None:
+                mod = self.model
+                layers_list = None
+                if hasattr(mod, "base_model"):
+                    bm = mod.base_model
+                    if hasattr(bm, "layers"):
+                        layers_list = bm.layers
+                    elif hasattr(bm, "encoder") and hasattr(bm.encoder, "layer"):
+                        layers_list = bm.encoder.layer
+                elif hasattr(mod, "encoder"):
+                    enc = mod.encoder
+                    if hasattr(enc, "layer"):
+                        layers_list = enc.layer
+                    elif hasattr(enc, "layers"):
+                        layers_list = enc.layers
+                elif hasattr(mod, "transformer"):
+                    tr = mod.transformer
+                    if hasattr(tr, "h"):
+                        layers_list = tr.h
+                    elif hasattr(tr, "layers"):
+                        layers_list = tr.layers
+                elif hasattr(mod, "layers"):
+                    layers_list = mod.layers
+                if layers_list is None:
+                    print(f"Warning: freeze_bottom_layers={n_freeze} requested but encoder layer list not found; skipping freeze.")
+                else:
+                    total = len(layers_list)
+                    if n_freeze <= 0:
+                        # nothing frozen
+                        for layer in layers_list:
+                            for p in layer.parameters():
+                                p.requires_grad = True
+                        if hasattr(mod, "classifier"):
+                            for p in mod.classifier.parameters():
+                                p.requires_grad = True
+                        print("freeze_bottom_layers <= 0; all encoder+classifier parameters trainable.")
+                    elif n_freeze >= total:
+                        for layer in layers_list:
+                            for p in layer.parameters():
+                                p.requires_grad = False
+                        if hasattr(mod, "classifier"):
+                            for p in mod.classifier.parameters():
+                                p.requires_grad = True
+                        print(f"freeze_bottom_layers={n_freeze} >= total layers ({total}); frozen all encoder layers, classifier trainable.")
+                    else:
+                        for i, layer in enumerate(layers_list):
+                            for p in layer.parameters():
+                                p.requires_grad = (i >= n_freeze)
+                        if hasattr(mod, "classifier"):
+                            for p in mod.classifier.parameters():
+                                p.requires_grad = True
+                        print(f"Partial unfreezing: frozen bottom {n_freeze}/{total} encoder layers; classifier trainable.")
+
         # For pythia
         if not self.tokenizer.pad_token:
             print("No padding token detected. Expanding tokenizer and setting padding token to [PAD].")
