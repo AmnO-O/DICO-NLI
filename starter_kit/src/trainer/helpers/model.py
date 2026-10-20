@@ -110,6 +110,17 @@ class Model:
             self.model.resize_token_embeddings(len(self.tokenizer))
             self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
+        # Optional embedding freeze. Kept after resize_token_embeddings so a
+        # freshly grown embedding table is frozen too.
+        if params.get("freeze_embeddings"):
+            for p in self.model.get_input_embeddings().parameters():
+                p.requires_grad = False
+            print("Input embeddings frozen.")
+
+        trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in self.model.parameters())
+        print(f"Trainable parameters: {trainable:,} / {total:,} ({trainable / total:.1%})")
+
         self.emb_size: int = self.model.config.hidden_size
         # self.model.config.max_position_embeddings
         self.max_length: int = int(params["max_length"])

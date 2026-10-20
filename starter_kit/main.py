@@ -48,6 +48,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--freeze_bottom_layers", type=int, default=None,
                         help="Freeze the bottom N encoder layers; train only the top (num_layers - N) layers and the classifier head. (ModernBERT/transformers encoder models only)")
+    parser.add_argument("--freeze_embeddings", action=argparse.BooleanOptionalAction, default=False,
+                        help="Also freeze the input embedding table. On ModernBERT-base this is ~26%% of all parameters, so it matters a lot for small-data runs.")
 
     parser.add_argument("--is_optuna_trial", action=argparse.BooleanOptionalAction, help="Whether this run is an Optuna hyperparameter optimization trial.", required=True)
     parser.add_argument("--study_name", type=str, help="Optuna study name")
@@ -126,6 +128,7 @@ if __name__ == "__main__":
         "wd": args.wd,
         "num_epochs": args.num_epochs,
         "freeze_bottom_layers": args.freeze_bottom_layers,
+        "freeze_embeddings": args.freeze_embeddings,
         "save_path": args.save_path,
         "epoch_to_stop": args.epoch_to_stop,
         "results_dir": args.results_dir,
