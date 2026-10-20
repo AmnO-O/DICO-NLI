@@ -146,14 +146,23 @@ class Trainer:
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         os.environ["PYTHONHASHSEED"] = str(seed)
-        os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
-        os.environ["ASCEND_LAUNCH_BLOCKING"] = "1"
-        os.environ["HCCL_DETERMINISTIC"] = "1"
-        os.environ["FLASH_ATTENTION_DETERMINISTIC"] = "1"
-        torch.use_deterministic_algorithms(True)
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
+        if self.params.get("fast", False):
+            # Speed mode: every determinism guard below forces a device sync per
+            # kernel launch. That is invisible at 256 tokens but dominates at 64,
+            # where each kernel is only microseconds long.
+            torch.backends.cudnn.benchmark = True
+            # TF32 matmuls on Ampere+ (L4/A100/RTX 30xx+); no-op on T4/P100.
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        else:
+            os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
+            os.environ["ASCEND_LAUNCH_BLOCKING"] = "1"
+            os.environ["HCCL_DETERMINISTIC"] = "1"
+            os.environ["FLASH_ATTENTION_DETERMINISTIC"] = "1"
+            torch.use_deterministic_algorithms(True)
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
         g = torch.Generator()
         g.manual_seed(seed)
         return g

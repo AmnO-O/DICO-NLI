@@ -60,6 +60,8 @@ if __name__ == "__main__":
     parser.add_argument("--epoch_to_stop", type=int, help="Epoch number to stop training in case intermediate saving is desired.")
     parser.add_argument("--patience", type=int, default=None,
                         help="Stop training when dev F1 has not improved for this many consecutive epochs. Requires --do_dev.")
+    parser.add_argument("--fast", action=argparse.BooleanOptionalAction, default=False,
+                        help="Speed mode: skip CUDA_LAUNCH_BLOCKING and the deterministic-kernel guards. Much faster on GPU at short max_length; small reproducibility risk.")
     parser.add_argument("--results_dir", type=str, default="results", help="Directory where timestamped prediction CSV files will be written.")
     parser.add_argument("--reference_path", type=str, help="Optional hidden reference CSV for official DiCo-NLI scoring.")
 
@@ -140,6 +142,7 @@ if __name__ == "__main__":
         "save_path": args.save_path,
         "epoch_to_stop": args.epoch_to_stop,
         "patience": args.patience,
+        "fast": args.fast,
         "results_dir": args.results_dir,
         "reference_path": args.reference_path,
         "max_length": args.max_length,
