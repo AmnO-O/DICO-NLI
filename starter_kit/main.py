@@ -78,7 +78,7 @@ if __name__ == "__main__":
             assert 0 <= args.warmup_pcrt <= 0.1, "--warmup_pcrt must be between 0 and 0.1."
             assert args.lr in [1e-6, 5e-6, 8e-6, 9e-6, 1e-5, 1.5e-5, 2e-5, 2.5e-5, 3e-5, 4e-5, 5e-5, 8e-5, 1e-4], "Learning rate must be one of the following: [1e-6, 5e-6, 8e-6, 9e-6, 1e-5, 1.5e-5, 2e-5, 2.5e-5, 3e-5, 4e-5, 5e-5, 8e-5, 1e-4]"
             assert args.wd in [1e-6, 5e-6, 8e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1], "Weight decay must be one of the following: [1e-6, 5e-6, 8e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1]"
-            assert 1 <= args.num_epochs <= 10, "--num_epochs must be between 1 and 10."
+            assert 1 <= args.num_epochs <= 100, "--num_epochs must be between 1 and 100."
             assert 8 <= args.batch_size <= 64 and args.batch_size % 8 == 0, "--batch_size must be a multiple of 8 and less than or equal to 64."
         if args.do_dev:
             assert args.dev_path is not None and os.path.isfile(path=args.dev_path), "A valid --dev_path must be specified when --do_dev is True."
