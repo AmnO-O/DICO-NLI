@@ -19,6 +19,26 @@ from src.trainer.helpers.model import Model
 from src.trainer.helpers.dataset_generator import NLIDataset
 from src.trainer.helpers.evaluation import evaluate
 
+
+def update_early_stopping(
+    best_f1: float,
+    epochs_without_improvement: int,
+    current_f1: float,
+    patience: int,
+    min_delta: float = 1e-4,
+) -> Tuple[float, int, bool]:
+    """Track the best dev F1 and decide whether to stop.
+
+    Returns ``(best_f1, epochs_without_improvement, should_stop)``. An epoch counts
+    as an improvement only when it beats ``best_f1 + min_delta``, so floating point
+    noise on a small dev set does not reset the counter.
+    """
+    if current_f1 > best_f1 + min_delta:
+        return current_f1, 0, False
+    epochs_without_improvement += 1
+    return best_f1, epochs_without_improvement, epochs_without_improvement >= patience
+
+
 class Trainer:
     def __init__(self, params: Dict[str, Union[str, int, float, bool, optuna.trial.Trial, None]]) -> None:
         """
@@ -194,6 +214,10 @@ class Trainer:
 
         history: List[Dict[str, Any]] = []
 
+        patience = self.params.get("patience")
+        best_dev_f1 = float("-inf")
+        epochs_without_improvement = 0
+
         for epoch in range(num_epochs):
             print(f"\n>>> Epoch {epoch + 1}/{num_epochs}")
             self.model.train()
@@ -237,6 +261,20 @@ class Trainer:
             if self.params["epoch_to_stop"] is not None and (epoch + 1) == int(self.params["epoch_to_stop"]):
                 print(f"Stopping at epoch {epoch + 1} as specified.")
                 break
+
+            if patience is not None and record.get("dev_f1_weighted") is not None:
+                best_dev_f1, epochs_without_improvement, should_stop = update_early_stopping(
+                    best_f1=best_dev_f1,
+                    epochs_without_improvement=epochs_without_improvement,
+                    current_f1=float(record["dev_f1_weighted"]),
+                    patience=int(patience),
+                )
+                if should_stop:
+                    print(
+                        f"Early stopping at epoch {epoch + 1}: dev F1 has not improved for "
+                        f"{epochs_without_improvement} epoch(s) (best so far: {best_dev_f1:.4f})."
+                    )
+                    break
             
         if self.params["save_path"] is not None:
             print(f"Saving model in path: {self.params['save_path']}")

@@ -58,6 +58,8 @@ if __name__ == "__main__":
     
     parser.add_argument("--save_path", type=str, help="Path to save the trained model.")
     parser.add_argument("--epoch_to_stop", type=int, help="Epoch number to stop training in case intermediate saving is desired.")
+    parser.add_argument("--patience", type=int, default=None,
+                        help="Stop training when dev F1 has not improved for this many consecutive epochs. Requires --do_dev.")
     parser.add_argument("--results_dir", type=str, default="results", help="Directory where timestamped prediction CSV files will be written.")
     parser.add_argument("--reference_path", type=str, help="Optional hidden reference CSV for official DiCo-NLI scoring.")
 
@@ -111,6 +113,12 @@ if __name__ == "__main__":
         assert not args.is_optuna_trial, "--epoch_to_stop not be set when --is_optuna_trial is True."
         assert args.do_train, "--epoch_to_stop can only be set if --do_train is True."  
 
+    if args.patience is not None:
+        assert args.patience >= 1, "--patience must be >= 1."
+        assert args.do_train, "--patience can only be set if --do_train is True."
+        assert args.do_dev, "--patience requires --do_dev (it stops on dev F1)."
+        assert not args.is_optuna_trial, "--patience must not be set when --is_optuna_trial is True (Optuna prunes instead)."
+
     params: Dict[str, Union[str, int, float, bool, None]] = {
         "model_path": args.model_path,
         "tokenizer_path": args.tokenizer_path,
@@ -131,6 +139,7 @@ if __name__ == "__main__":
         "freeze_embeddings": args.freeze_embeddings,
         "save_path": args.save_path,
         "epoch_to_stop": args.epoch_to_stop,
+        "patience": args.patience,
         "results_dir": args.results_dir,
         "reference_path": args.reference_path,
         "max_length": args.max_length,
