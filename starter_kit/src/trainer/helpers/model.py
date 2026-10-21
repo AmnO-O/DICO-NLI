@@ -33,6 +33,10 @@ class Model:
                 # GPT2, OPT
                 print("Warning: classifier_dropout attribute not found in AutoConfig. Dropout will make no effect.")
 
+        # The checkpoint's own head size, read before the override below. A
+        # 3-way NLI checkpoint (mDeBERTa, XLM-R-xnli) does not match our 4-way
+        # task, and transformers>=5 raises on that mismatch instead of warning.
+        checkpoint_num_labels = getattr(self.config, "num_labels", None)
         self.config.num_labels = int(params["num_labels"])
 
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -42,7 +46,15 @@ class Model:
         self.model = AutoModelForSequenceClassification.from_pretrained(
             pretrained_model_name_or_path=str(params["model_path"]),
             config=self.config,
+            ignore_mismatched_sizes=(
+                checkpoint_num_labels is not None
+                and int(checkpoint_num_labels) != int(params["num_labels"])
+            ),
         )
+        # transformers>=5 loads with dtype="auto", which honours the checkpoint's
+        # torch_dtype. mDeBERTa's config says float16, and this trainer has no
+        # autocast or GradScaler, so force fp32 before the optimizer sees it.
+        self.model = self.model.float()
 
         # Optional partial unfreezing: freeze bottom N encoder layers
         if params.get("freeze_bottom_layers") is not None:
