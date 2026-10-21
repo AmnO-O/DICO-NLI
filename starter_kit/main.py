@@ -66,6 +66,8 @@ if __name__ == "__main__":
                         help="Reversal-equivariant inference: score (text1, text2) and (text2, text1), flip the reversed labels and average. Doubles inference time; makes predictions exactly consistent under reversal.")
     parser.add_argument("--symmetric_mode", type=str, default="prob", choices=["prob", "logprob", "logit"],
                         help="Space in which the two directions are averaged (prob, logprob or logit). Equal weights are required for exact equivariance.")
+    parser.add_argument("--twin_prior", type=str, default="off", choices=["off", "forbid", "force", "full"],
+                        help="Structural prior from duplicated pair_id: forbid = a row with a reversal cannot be NEGATIVE_OTHER, force = a row without one must be, full = both. Requires a pair_id column in the dev/test CSV.")
     parser.add_argument("--results_dir", type=str, default="results", help="Directory where timestamped prediction CSV files will be written.")
     parser.add_argument("--reference_path", type=str, help="Optional hidden reference CSV for official DiCo-NLI scoring.")
 
@@ -128,6 +130,9 @@ if __name__ == "__main__":
     if args.symmetric:
         assert args.do_dev or args.do_test, "--symmetric needs --do_dev or --do_test (there is nothing to predict otherwise)."
 
+    if args.twin_prior != "off":
+        assert args.do_dev or args.do_test, "--twin_prior needs --do_dev or --do_test (there is nothing to predict otherwise)."
+
     params: Dict[str, Union[str, int, float, bool, None]] = {
         "model_path": args.model_path,
         "tokenizer_path": args.tokenizer_path,
@@ -152,6 +157,7 @@ if __name__ == "__main__":
         "fast": args.fast,
         "symmetric": args.symmetric,
         "symmetric_mode": args.symmetric_mode,
+        "twin_prior": args.twin_prior,
         "results_dir": args.results_dir,
         "reference_path": args.reference_path,
         "max_length": args.max_length,

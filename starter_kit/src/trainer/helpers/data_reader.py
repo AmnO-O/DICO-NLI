@@ -51,3 +51,22 @@ def read_transform_dico(path: str) -> Tuple[np.ndarray, np.ndarray, Optional[np.
         df[["FIRST_TEXT", "SECOND_TEXT"]].to_numpy(), 
         transformed_labels
     )
+
+
+def read_twin_mask(path: str) -> Optional[np.ndarray]:
+    """Flag the rows whose ``pair_id`` occurs more than once.
+
+    DiCo-NLI stores every reversible pair once in each direction, so a repeated
+    ``pair_id`` means the row has a reversal elsewhere in the file and therefore
+    cannot be NEGATIVE_OTHER. A unique ``pair_id`` marks a row that was stored
+    on its own, which is exactly how the NEGATIVE_OTHER rows are built.
+
+    Returns ``None`` when the file has no ``pair_id`` column (for example a
+    submission template), so callers can decide whether that is fatal.
+    """
+    df: pd.DataFrame = pd.read_csv(filepath_or_buffer=path, sep=",", header=0)
+    if "pair_id" not in df.columns:
+        return None
+    counts = df["pair_id"].value_counts()
+    # NaN pair_ids are not counted by value_counts and map to NaN -> False.
+    return (df["pair_id"].map(counts).to_numpy(dtype="float64") > 1.0)

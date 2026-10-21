@@ -14,7 +14,7 @@ import torch
 from torch.utils.data import DataLoader, SequentialSampler, RandomSampler
 import transformers
 from transformers.modeling_outputs import SequenceClassifierOutput
-from src.trainer.helpers.data_reader import read_transform_dico, label_encoder
+from src.trainer.helpers.data_reader import read_transform_dico, read_twin_mask, label_encoder
 from src.trainer.helpers.model import Model
 from src.trainer.helpers.dataset_generator import NLIDataset
 from src.trainer.helpers.evaluation import evaluate
@@ -151,6 +151,35 @@ class Trainer:
                 f"\nSymmetric inference: ON (mode={self.symmetric_mode}) | "
                 f"reversal permutation {self.reversal_perm} over {[str(x) for x in self.labels]}"
             )
+
+        # Structural prior from pair_id duplication. DiCo-NLI stores every
+        # reversible pair once in each direction and every NEGATIVE_OTHER row on
+        # its own, so a repeated pair_id means "this row has a reversal" and a
+        # unique one means "this row is NEGATIVE_OTHER". Measured on dev
+        # (554/554 reversible rows have a twin, 106/106 NEG do not) and trial
+        # (672/672 and 125/125), so on those files the partition is exact.
+        self.twin_prior: str = str(params.get("twin_prior", "off"))
+        self.twin_masks: Dict[str, np.ndarray] = {}
+        self.negative_index: Optional[int] = None
+        if self.twin_prior != "off":
+            if self.twin_prior not in ("forbid", "force", "full"):
+                raise ValueError(f"Unknown twin_prior: {self.twin_prior!r}")
+            self.negative_index = int(np.flatnonzero(self.labels == "NEGATIVE_OTHER")[0])
+            for partition in ("dev", "test"):
+                path = params.get(f"{partition}_path")
+                if not params.get(f"do_{partition}") or path is None:
+                    continue
+                mask = read_twin_mask(path=str(path))
+                if mask is None:
+                    raise ValueError(
+                        f"--twin_prior={self.twin_prior} needs a pair_id column in {path}."
+                    )
+                self.twin_masks[partition] = mask
+                print(
+                    f"Twin prior ({self.twin_prior}) on {partition}: "
+                    f"{int(mask.sum())} rows have a reversal, "
+                    f"{int((~mask).sum())} are NEGATIVE_OTHER candidates"
+                )
 
         if params["do_train"]:
             self.train_loop()
@@ -401,6 +430,39 @@ class Trainer:
             return 0.5 * (logits.log_softmax(dim=-1) + logits_rev.log_softmax(dim=-1))
         return 0.5 * (logits.softmax(dim=-1) + logits_rev.softmax(dim=-1))
 
+    def apply_twin_prior(self, logits: torch.Tensor, partition: str, offset: int) -> torch.Tensor:
+        """Restrict the label set using the pair_id structure of ``partition``.
+
+        ``forbid``: a row that has a reversal cannot be NEGATIVE_OTHER.
+        ``force``: a row with no reversal must be NEGATIVE_OTHER.
+        ``full``: both directions.
+
+        Applied *after* ``combine_symmetric`` and it commutes with the reversal
+        permutation (NEGATIVE_OTHER maps to itself), so the predictions stay
+        exactly reversal-consistent.
+        """
+        mask = self.twin_masks.get(partition)
+        if mask is None or self.twin_prior == "off":
+            return logits
+
+        chunk = mask[offset:offset + logits.shape[0]]
+        if chunk.size != logits.shape[0]:
+            raise ValueError(
+                f"Twin prior is misaligned on {partition}: {chunk.size} flags for "
+                f"{logits.shape[0]} rows at offset {offset}."
+            )
+
+        neg = int(self.negative_index)
+        twin = torch.as_tensor(chunk, device=logits.device, dtype=torch.bool)
+        logits = logits.clone()
+        if self.twin_prior in ("forbid", "full"):
+            logits[twin, neg] = float("-inf")
+        if self.twin_prior in ("force", "full"):
+            lone = ~twin
+            logits[lone] = float("-inf")
+            logits[lone, neg] = 0.0
+        return logits
+
     def evaluation_loop(self, partition: str, print_results: bool) -> Optional[Dict[str, Union[float, np.ndarray]]]:
         self.model.eval()
         if partition == "test":
@@ -427,6 +489,8 @@ class Trainer:
                 if batch_rev is not None:
                     logits_rev: torch.Tensor = self.model.forward(batch=batch_rev, device=self.device).logits
                     logits = self.combine_symmetric(logits=logits, logits_rev=logits_rev)
+                if self.twin_prior != "off":
+                    logits = self.apply_twin_prior(logits=logits, partition=partition, offset=len(preds))
                 batch_preds:List[int] = torch.argmax(input=logits, dim=-1).cpu().numpy().tolist()
                 preds.extend(batch_preds)
 
