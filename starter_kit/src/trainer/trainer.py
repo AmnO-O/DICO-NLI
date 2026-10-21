@@ -129,6 +129,29 @@ class Trainer:
         self.test_dataset: Optional[NLIDataset]
         self.test_dataloader: Optional[DataLoader]
 
+        # Reversal-equivariant inference. Every row is scored twice, as
+        # (text1, text2) and as (text2, text1); the reversed view has its
+        # FORWARD/BACKWARD labels exchanged before the two are averaged.
+        # Equal weights are what makes the result exactly reversal-consistent:
+        # with weight w, swapping the inputs returns flip(p) only when w = 1/2.
+        self.symmetric: bool = bool(params.get("symmetric", False))
+        self.symmetric_mode: str = str(params.get("symmetric_mode", "prob"))
+        self.reversal_perm: List[int] = []
+        self.dev_dataloader_rev: Optional[DataLoader] = None
+        self.test_dataloader_rev: Optional[DataLoader] = None
+        if self.symmetric:
+            if self.symmetric_mode not in ("prob", "logprob", "logit"):
+                raise ValueError(f"Unknown symmetric_mode: {self.symmetric_mode!r}")
+            self.reversal_perm = self.build_reversal_permutation()
+            if params["do_dev"]:
+                self.dev_dataloader_rev = self.build_reversed_dataloader(X=self.X_dev, y=self.y_dev, ids=self.ids_dev)
+            if params["do_test"]:
+                self.test_dataloader_rev = self.build_reversed_dataloader(X=self.X_test, y=self.y_test, ids=self.ids_test)
+            print(
+                f"\nSymmetric inference: ON (mode={self.symmetric_mode}) | "
+                f"reversal permutation {self.reversal_perm} over {[str(x) for x in self.labels]}"
+            )
+
         if params["do_train"]:
             self.train_loop()
 
@@ -332,6 +355,52 @@ class Trainer:
         print(f"Training history written to: {json_path}")
 
 
+    def build_reversal_permutation(self) -> List[int]:
+        """Map each label index to the index of its reversed counterpart.
+
+        Swapping text1 and text2 leaves EQUIVALENCE and NEGATIVE_OTHER alone
+        while FORWARD_ENTAILMENT and BACKWARD_ENTAILMENT exchange places.
+        Derived from ``self.labels`` so it follows the label encoder instead of
+        hard-coding indices.
+        """
+        reverse_of = {
+            "EQUIVALENCE": "EQUIVALENCE",
+            "FORWARD_ENTAILMENT": "BACKWARD_ENTAILMENT",
+            "BACKWARD_ENTAILMENT": "FORWARD_ENTAILMENT",
+            "NEGATIVE_OTHER": "NEGATIVE_OTHER",
+        }
+        names = [str(name) for name in self.labels]
+        unknown = [name for name in names if name not in reverse_of]
+        if unknown:
+            raise ValueError(f"Cannot build a reversal permutation for labels: {unknown}")
+        return [names.index(reverse_of[name]) for name in names]
+
+    def build_reversed_dataloader(self, X: np.ndarray, y: Optional[np.ndarray], ids: np.ndarray) -> DataLoader:
+        """Tokenize the same rows with text1 and text2 swapped.
+
+        Both loaders use SequentialSampler over the same order, so batch i of
+        one lines up with batch i of the other and the instance ids match.
+        """
+        encoded = self.model.tokenize(data=X[:, ::-1])
+        dataset = NLIDataset(X=encoded, labels=y, ids=ids, device=self.device)
+        return DataLoader(
+            dataset=dataset,
+            batch_size=int(self.params["batch_size"]),
+            collate_fn=dataset.collate_fn,
+            sampler=SequentialSampler(dataset),
+            num_workers=0,
+        )
+
+    def combine_symmetric(self, logits: torch.Tensor, logits_rev: torch.Tensor) -> torch.Tensor:
+        """Average the forward view with the label-flipped reversed view."""
+        perm = torch.as_tensor(self.reversal_perm, device=logits.device, dtype=torch.long)
+        logits_rev = logits_rev.index_select(dim=-1, index=perm)
+        if self.symmetric_mode == "logit":
+            return 0.5 * (logits + logits_rev)
+        if self.symmetric_mode == "logprob":
+            return 0.5 * (logits.log_softmax(dim=-1) + logits_rev.log_softmax(dim=-1))
+        return 0.5 * (logits.softmax(dim=-1) + logits_rev.softmax(dim=-1))
+
     def evaluation_loop(self, partition: str, print_results: bool) -> Optional[Dict[str, Union[float, np.ndarray]]]:
         self.model.eval()
         if partition == "test":
@@ -345,11 +414,19 @@ class Trainer:
         preds: List[int] = []
         labels: Optional[List[int]] = []
         ids: List[str] = []
-        
+
+        reverse_loader: Optional[DataLoader] = None
+        if self.symmetric:
+            reverse_loader = self.dev_dataloader_rev if partition == "dev" else self.test_dataloader_rev
+        batches = zip(dataloader, reverse_loader) if reverse_loader is not None else ((batch, None) for batch in dataloader)
+
         with torch.no_grad():
-            for batch in tqdm(dataloader):
+            for batch, batch_rev in tqdm(batches, total=len(dataloader)):
                 outputs: SequenceClassifierOutput = self.model.forward(batch=batch, device=self.device)
                 logits: torch.Tensor = outputs.logits
+                if batch_rev is not None:
+                    logits_rev: torch.Tensor = self.model.forward(batch=batch_rev, device=self.device).logits
+                    logits = self.combine_symmetric(logits=logits, logits_rev=logits_rev)
                 batch_preds:List[int] = torch.argmax(input=logits, dim=-1).cpu().numpy().tolist()
                 preds.extend(batch_preds)
 

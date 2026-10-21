@@ -62,6 +62,10 @@ if __name__ == "__main__":
                         help="Stop training when dev F1 has not improved for this many consecutive epochs. Requires --do_dev.")
     parser.add_argument("--fast", action=argparse.BooleanOptionalAction, default=False,
                         help="Speed mode: skip CUDA_LAUNCH_BLOCKING and the deterministic-kernel guards. Much faster on GPU at short max_length; small reproducibility risk.")
+    parser.add_argument("--symmetric", action=argparse.BooleanOptionalAction, default=False,
+                        help="Reversal-equivariant inference: score (text1, text2) and (text2, text1), flip the reversed labels and average. Doubles inference time; makes predictions exactly consistent under reversal.")
+    parser.add_argument("--symmetric_mode", type=str, default="prob", choices=["prob", "logprob", "logit"],
+                        help="Space in which the two directions are averaged (prob, logprob or logit). Equal weights are required for exact equivariance.")
     parser.add_argument("--results_dir", type=str, default="results", help="Directory where timestamped prediction CSV files will be written.")
     parser.add_argument("--reference_path", type=str, help="Optional hidden reference CSV for official DiCo-NLI scoring.")
 
@@ -121,6 +125,9 @@ if __name__ == "__main__":
         assert args.do_dev, "--patience requires --do_dev (it stops on dev F1)."
         assert not args.is_optuna_trial, "--patience must not be set when --is_optuna_trial is True (Optuna prunes instead)."
 
+    if args.symmetric:
+        assert args.do_dev or args.do_test, "--symmetric needs --do_dev or --do_test (there is nothing to predict otherwise)."
+
     params: Dict[str, Union[str, int, float, bool, None]] = {
         "model_path": args.model_path,
         "tokenizer_path": args.tokenizer_path,
@@ -143,6 +150,8 @@ if __name__ == "__main__":
         "epoch_to_stop": args.epoch_to_stop,
         "patience": args.patience,
         "fast": args.fast,
+        "symmetric": args.symmetric,
+        "symmetric_mode": args.symmetric_mode,
         "results_dir": args.results_dir,
         "reference_path": args.reference_path,
         "max_length": args.max_length,
