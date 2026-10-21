@@ -68,6 +68,8 @@ if __name__ == "__main__":
                         help="Space in which the two directions are averaged (prob, logprob or logit). Equal weights are required for exact equivariance.")
     parser.add_argument("--twin_prior", type=str, default="off", choices=["off", "forbid", "force", "full"],
                         help="Structural prior from duplicated pair_id: forbid = a row with a reversal cannot be NEGATIVE_OTHER, force = a row without one must be, full = both. Requires a pair_id column in the dev/test CSV.")
+    parser.add_argument("--save_probs", action=argparse.BooleanOptionalAction, default=False,
+                        help="Write probabilities_<partition>_<timestamp>.npy next to each prediction CSV (same row order, model probabilities before any twin prior) so several seeds can be averaged without retraining.")
     parser.add_argument("--results_dir", type=str, default="results", help="Directory where timestamped prediction CSV files will be written.")
     parser.add_argument("--reference_path", type=str, help="Optional hidden reference CSV for official DiCo-NLI scoring.")
 
@@ -158,6 +160,7 @@ if __name__ == "__main__":
         "symmetric": args.symmetric,
         "symmetric_mode": args.symmetric_mode,
         "twin_prior": args.twin_prior,
+        "save_probs": args.save_probs,
         "results_dir": args.results_dir,
         "reference_path": args.reference_path,
         "max_length": args.max_length,

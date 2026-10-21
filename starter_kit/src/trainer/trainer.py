@@ -136,6 +136,9 @@ class Trainer:
         # with weight w, swapping the inputs returns flip(p) only when w = 1/2.
         self.symmetric: bool = bool(params.get("symmetric", False))
         self.symmetric_mode: str = str(params.get("symmetric_mode", "prob"))
+        # Opt-in: dump the per-row probabilities next to each prediction CSV so
+        # several seeds can be averaged afterwards without retraining.
+        self.save_probs: bool = bool(params.get("save_probs", False))
         self.reversal_perm: List[int] = []
         self.dev_dataloader_rev: Optional[DataLoader] = None
         self.test_dataloader_rev: Optional[DataLoader] = None
@@ -476,6 +479,7 @@ class Trainer:
         preds: List[int] = []
         labels: Optional[List[int]] = []
         ids: List[str] = []
+        probs: List[np.ndarray] = []
 
         reverse_loader: Optional[DataLoader] = None
         if self.symmetric:
@@ -489,6 +493,11 @@ class Trainer:
                 if batch_rev is not None:
                     logits_rev: torch.Tensor = self.model.forward(batch=batch_rev, device=self.device).logits
                     logits = self.combine_symmetric(logits=logits, logits_rev=logits_rev)
+                if self.save_probs:
+                    # Saved before the twin prior: these are the model's own
+                    # probabilities, so an ensemble can average across seeds and
+                    # only then decide whether to apply the prior.
+                    probs.append(logits.softmax(dim=-1).cpu().numpy().astype(np.float32))
                 if self.twin_prior != "off":
                     logits = self.apply_twin_prior(logits=logits, partition=partition, offset=len(preds))
                 batch_preds:List[int] = torch.argmax(input=logits, dim=-1).cpu().numpy().tolist()
@@ -506,7 +515,10 @@ class Trainer:
                 decoded_preds: np.ndarray = label_encoder.inverse_transform(y=np.array(preds).ravel())
                 decoded_labels: np.ndarray = label_encoder.inverse_transform(y=np.array(labels).ravel())
                 if self.params["optuna"] is None:
-                    prediction_path = self.write_predictions(ids=ids, labels=decoded_preds, partition=partition)
+                    prediction_path = self.write_predictions(
+                        ids=ids, labels=decoded_preds, partition=partition,
+                        probs=probs if self.save_probs else None,
+                    )
                     self.score_official_predictions(prediction_path=prediction_path, partition=partition)
 
                 print(f"\nEvaluation results on {partition} set:")
@@ -544,14 +556,18 @@ class Trainer:
                 
                 preds = label_encoder.inverse_transform(y=np.array(preds).ravel())
                 if self.params["optuna"] is None:
-                    prediction_path = self.write_predictions(ids=ids, labels=preds, partition=partition)
+                    prediction_path = self.write_predictions(
+                        ids=ids, labels=preds, partition=partition,
+                        probs=probs if self.save_probs else None,
+                    )
                     self.score_official_predictions(prediction_path=prediction_path, partition=partition)
 
                 for id, sent, pred in zip(ids, sentences, preds):
                     print(f"ID: {id} | Sentence: {sent} | Predicted: {pred}")
         return results
 
-    def write_predictions(self, ids: List[str], labels: np.ndarray, partition: str) -> Path:
+    def write_predictions(self, ids: List[str], labels: np.ndarray, partition: str,
+                          probs: Optional[List[np.ndarray]] = None) -> Path:
         results_dir = Path(str(self.params["results_dir"]))
         results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -565,6 +581,17 @@ class Trainer:
                 writer.writerow({"instance_id": instance_id, "label": str(label)})
 
         print(f"Predictions written to: {output_path}")
+
+        if probs is not None:
+            prob_path = output_path.with_name(
+                output_path.stem.replace("predictions_", "probabilities_") + ".npy"
+            )
+            # concatenate, not stack: the final batch can be shorter, and the
+            # row order must match the CSV exactly.
+            stacked = np.concatenate(probs, axis=0)
+            np.save(prob_path, stacked)
+            print(f"Probabilities written to: {prob_path} "
+                  f"(shape {stacked.shape}, rows in the same order as the CSV)")
         return output_path
 
     def score_official_predictions(self, prediction_path: Path, partition: str) -> None:

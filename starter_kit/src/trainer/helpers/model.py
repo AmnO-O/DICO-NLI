@@ -157,10 +157,14 @@ class Model:
         texts_first: np.ndarray
         texts_second: np.ndarray
 
+        # A whole split is tokenised in a single call, so "longest" pads every
+        # row to the longest pair in that split (34 tokens on track 1) instead
+        # of to max_length (64). max_length still caps truncation. Same logits,
+        # roughly half the attention work.
         encs: BatchEncoding = self.tokenizer(
             list(texts_first),
             list(texts_second),
-            padding="max_length",
+            padding="longest",
             truncation="only_second",
             return_tensors="pt",
             max_length=self.max_length,
