@@ -10,23 +10,24 @@ script asserts that track 1 dev shares zero ``pair_id`` with any train track.
 
 Outputs (regenerable, so they are gitignored):
 
-    final_data/train/dico_nli_train_multilingual.csv   tracks 1-3   9,126 rows
-    final_data/train/dico_nli_train_multitrack.csv     tracks 1-4  27,378 rows
+    <out-dir>/dico_nli_train_multilingual.csv   tracks 1-3   9,126 rows
+    <out-dir>/dico_nli_train_multitrack.csv     tracks 1-4  27,378 rows
 
 Usage:
     python scripts/build_multitrack_train.py
+    python scripts/build_multitrack_train.py --data-root /kaggle/input/... --out-dir /kaggle/working/derived
 """
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pandas as pd
 
-DATA_ROOT = Path("final_data")
 LABELS = {"FORWARD_ENTAILMENT", "BACKWARD_ENTAILMENT", "EQUIVALENCE", "NEGATIVE_OTHER"}
 
-# How many directed renderings each decision has inside a track. Track 1-3 are
+# How many directed renderings each decision has inside a track. Tracks 1-3 are
 # monolingual (one rendering per direction), track 4 carries all six ordered
 # language pairs.
 DIRECTIONS_PER_TRACK = {1: 1, 2: 1, 3: 1, 4: 6}
@@ -43,8 +44,8 @@ COLUMNS = [
 ]
 
 
-def load_track(track: int) -> pd.DataFrame:
-    path = DATA_ROOT / "train" / f"dico_nli_train_track{track}_participant_labeled.csv"
+def load_track(data_root: Path, track: int) -> pd.DataFrame:
+    path = data_root / "train" / f"dico_nli_train_track{track}_participant_labeled.csv"
     df = pd.read_csv(path, dtype=str)
     df["track"] = track
     for column in ("text1_lang", "text2_lang"):
@@ -69,22 +70,22 @@ def check_track(df: pd.DataFrame, track: int) -> None:
         raise ValueError(f"track {track}: a non-NEG row is not a doubled rendering")
 
 
-def check_disjoint_from_dev(train: pd.DataFrame) -> None:
-    dev = pd.read_csv(DATA_ROOT / "dev" / "dico_nli_dev_track1_reference.csv", dtype=str)
+def check_disjoint_from_dev(data_root: Path, train: pd.DataFrame) -> None:
+    dev = pd.read_csv(data_root / "dev" / "dico_nli_dev_track1_reference.csv", dtype=str)
     shared = set(dev["pair_id"].dropna()) & set(train["pair_id"].dropna())
     if shared:
         raise ValueError(f"{len(shared)} pair_ids leak from train into track 1 dev")
 
 
-def build(tracks: tuple[int, ...]) -> pd.DataFrame:
-    frames = [load_track(track) for track in tracks]
+def build(data_root: Path, tracks: tuple[int, ...]) -> pd.DataFrame:
+    frames = [load_track(data_root, track) for track in tracks]
     for frame, track in zip(frames, tracks):
         check_track(frame, track)
 
     combined = pd.concat(frames, ignore_index=True)
     if combined["instance_id"].duplicated().any():
         raise ValueError("duplicate instance_id across tracks")
-    check_disjoint_from_dev(combined)
+    check_disjoint_from_dev(data_root, combined)
     return combined.sort_values(["track", "instance_id"], kind="stable").reset_index(drop=True)
 
 
@@ -97,15 +98,25 @@ def describe(name: str, df: pd.DataFrame) -> None:
 
 
 def main() -> None:
-    out_dir = DATA_ROOT / "train"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-root", type=Path, default=Path("final_data"),
+                        help="Directory holding the released train/ and dev/ folders.")
+    parser.add_argument("--out-dir", type=Path, default=None,
+                        help="Where to write the combined CSVs. Defaults to <data-root>/train. "
+                             "On Kaggle pass a writable path such as /kaggle/working/derived.")
+    args = parser.parse_args()
 
-    multilingual = build((1, 2, 3))
+    data_root: Path = args.data_root
+    out_dir: Path = args.out_dir or (data_root / "train")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    multilingual = build(data_root, (1, 2, 3))
     describe("multilingual (tracks 1-3)", multilingual)
     path = out_dir / "dico_nli_train_multilingual.csv"
     multilingual.to_csv(path, index=False, lineterminator="\n")
     print(f"   -> {path}")
 
-    multitrack = build((1, 2, 3, 4))
+    multitrack = build(data_root, (1, 2, 3, 4))
     describe("multitrack (tracks 1-4)", multitrack)
     path = out_dir / "dico_nli_train_multitrack.csv"
     multitrack.to_csv(path, index=False, lineterminator="\n")
