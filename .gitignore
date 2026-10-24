@@ -228,3 +228,8 @@ final_data/DiCO-NLI.zip
 # Derived training sets, rebuilt by scripts/build_multitrack_train.py
 final_data/train/dico_nli_train_multilingual.csv
 final_data/train/dico_nli_train_multitrack.csv
+
+# Local secrets: real keys never enter git, .env.example stays as documentation
+.env
+.env.*
+!.env.example

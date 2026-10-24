@@ -70,10 +70,27 @@ Reply with JSON only, no prose: {{"label": "<one of the four labels>"}}"""
 
 
 # --------------------------------------------------------------------------- helpers
+def load_dotenv(path: Path = ROOT / ".env") -> None:
+    """Read KEY=VALUE lines from .env without overriding the real environment."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name, value = name.strip(), value.strip().strip('"').strip("'")
+        # An empty value means "not configured", so let it fall through to the alias.
+        if name and value and not os.environ.get(name):
+            os.environ[name] = value
+
+
 def api_key() -> str:
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not key:
-        raise SystemExit("set GEMINI_API_KEY (or GOOGLE_API_KEY) in the environment")
+        raise SystemExit(
+            "set GEMINI_API_KEY in .env (or in the environment); .env.example shows the layout"
+        )
     return key
 
 
@@ -334,6 +351,8 @@ def main() -> None:
     parser.add_argument("--compare", type=Path, default=None)
     parser.add_argument("--fill-missing", default=None, choices=LABELS)
     args = parser.parse_args()
+
+    load_dotenv()
 
     if args.mode == "export":
         export()
